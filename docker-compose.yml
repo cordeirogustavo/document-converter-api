@@ -1,0 +1,20 @@
+version: "3.8"
+
+services:
+  document-converter-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    volumes:
+      - .:/app
+      - markitdown_tmp:/tmp
+    environment:
+      - PORT=8000
+      # Descomente e configure o endpoint do Document Intelligence se necessário
+      # - DOCINTEL_ENDPOINT=https://seu-endpoint.cognitiveservices.azure.com/
+    restart: unless-stopped
+volumes:
+  markitdown_tmp:
+    driver: local
