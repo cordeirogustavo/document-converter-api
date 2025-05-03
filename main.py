@@ -1,13 +1,14 @@
 from fastapi import FastAPI, UploadFile, File, HTTPException, Form, Depends
 from fastapi.responses import JSONResponse
-from typing import Optional
+from typing import Optional, List, Dict
 import io
 import os
 import logging
 import importlib.metadata
 from markitdown import MarkItDown
 import uvicorn
-from pydantic import BaseModel
+from pydantic import BaseModel, HttpUrl
+import re
 
 # Configurar logging
 logging.basicConfig(
@@ -15,6 +16,171 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
 )
 logger = logging.getLogger(__name__)
+
+# Lista de idiomas suportados para transcrição do YouTube
+SUPPORTED_LANGUAGES: Dict[str, str] = {
+    "ab": "Abkhazian",
+    "aa": "Afar",
+    "af": "Afrikaans",
+    "ak": "Akan",
+    "sq": "Albanian",
+    "am": "Amharic",
+    "ar": "Arabic",
+    "hy": "Armenian",
+    "as": "Assamese",
+    "ay": "Aymara",
+    "az": "Azerbaijani",
+    "bn": "Bangla",
+    "ba": "Bashkir",
+    "eu": "Basque",
+    "be": "Belarusian",
+    "bho": "Bhojpuri",
+    "bs": "Bosnian",
+    "br": "Breton",
+    "bg": "Bulgarian",
+    "my": "Burmese",
+    "ca": "Catalan",
+    "ceb": "Cebuano",
+    "zh-Hans": "Chinese (Simplified)",
+    "zh-Hant": "Chinese (Traditional)",
+    "co": "Corsican",
+    "hr": "Croatian",
+    "cs": "Czech",
+    "da": "Danish",
+    "dv": "Divehi",
+    "nl": "Dutch",
+    "dz": "Dzongkha",
+    "en": "English",
+    "eo": "Esperanto",
+    "et": "Estonian",
+    "ee": "Ewe",
+    "fo": "Faroese",
+    "fj": "Fijian",
+    "fil": "Filipino",
+    "fi": "Finnish",
+    "fr": "French",
+    "gaa": "Ga",
+    "gl": "Galician",
+    "lg": "Ganda",
+    "ka": "Georgian",
+    "de": "German",
+    "el": "Greek",
+    "gn": "Guarani",
+    "gu": "Gujarati",
+    "ht": "Haitian Creole",
+    "ha": "Hausa",
+    "haw": "Hawaiian",
+    "iw": "Hebrew",
+    "hi": "Hindi",
+    "hmn": "Hmong",
+    "hu": "Hungarian",
+    "is": "Icelandic",
+    "ig": "Igbo",
+    "id": "Indonesian",
+    "iu": "Inuktitut",
+    "ga": "Irish",
+    "it": "Italian",
+    "ja": "Japanese",
+    "jv": "Javanese",
+    "kl": "Kalaallisut",
+    "kn": "Kannada",
+    "kk": "Kazakh",
+    "kha": "Khasi",
+    "km": "Khmer",
+    "rw": "Kinyarwanda",
+    "ko": "Korean",
+    "kri": "Krio",
+    "ku": "Kurdish",
+    "ky": "Kyrgyz",
+    "lo": "Lao",
+    "la": "Latin",
+    "lv": "Latvian",
+    "ln": "Lingala",
+    "lt": "Lithuanian",
+    "lua": "Luba-Lulua",
+    "luo": "Luo",
+    "lb": "Luxembourgish",
+    "mk": "Macedonian",
+    "mg": "Malagasy",
+    "ms": "Malay",
+    "ml": "Malayalam",
+    "mt": "Maltese",
+    "gv": "Manx",
+    "mi": "Māori",
+    "mr": "Marathi",
+    "mn": "Mongolian",
+    "mfe": "Morisyen",
+    "ne": "Nepali",
+    "new": "Newari",
+    "nso": "Northern Sotho",
+    "no": "Norwegian",
+    "ny": "Nyanja",
+    "oc": "Occitan",
+    "or": "Odia",
+    "om": "Oromo",
+    "os": "Ossetic",
+    "pam": "Pampanga",
+    "ps": "Pashto",
+    "fa": "Persian",
+    "pl": "Polish",
+    "pt": "Portuguese",
+    "pt-PT": "Portuguese (Portugal)",
+    "pa": "Punjabi",
+    "qu": "Quechua",
+    "ro": "Romanian",
+    "rn": "Rundi",
+    "ru": "Russian",
+    "sm": "Samoan",
+    "sg": "Sango",
+    "sa": "Sanskrit",
+    "gd": "Scottish Gaelic",
+    "sr": "Serbian",
+    "crs": "Seselwa Creole French",
+    "sn": "Shona",
+    "sd": "Sindhi",
+    "si": "Sinhala",
+    "sk": "Slovak",
+    "sl": "Slovenian",
+    "so": "Somali",
+    "st": "Southern Sotho",
+    "es": "Spanish",
+    "su": "Sundanese",
+    "sw": "Swahili",
+    "ss": "Swati",
+    "sv": "Swedish",
+    "tg": "Tajik",
+    "ta": "Tamil",
+    "tt": "Tatar",
+    "te": "Telugu",
+    "th": "Thai",
+    "bo": "Tibetan",
+    "ti": "Tigrinya",
+    "to": "Tongan",
+    "ts": "Tsonga",
+    "tn": "Tswana",
+    "tum": "Tumbuka",
+    "tr": "Turkish",
+    "tk": "Turkmen",
+    "uk": "Ukrainian",
+    "ur": "Urdu",
+    "ug": "Uyghur",
+    "uz": "Uzbek",
+    "ve": "Venda",
+    "vi": "Vietnamese",
+    "war": "Waray",
+    "cy": "Welsh",
+    "fy": "Western Frisian",
+    "wo": "Wolof",
+    "xh": "Xhosa",
+    "yi": "Yiddish",
+    "yo": "Yoruba",
+    "zu": "Zulu"
+}
+
+# Gerados automaticamente
+AUTO_GENERATED_LANGUAGES: Dict[str, str] = {
+    "pt": "Portuguese (auto-generated)"
+}
 
 # Verificar versão da biblioteca MarkItDown
 try:
@@ -47,6 +213,17 @@ class ConversionOptions(BaseModel):
     use_docintel: bool = False
     docintel_endpoint: Optional[str] = None
     llm_description: bool = False
+
+class YouTubeConversionRequest(BaseModel):
+    url: HttpUrl
+    enable_plugins: bool = False
+    language: Optional[str] = None
+    language_list: Optional[List[str]] = None
+
+class YouTubeTranscriptRequest(BaseModel):
+    url: HttpUrl
+    language: Optional[str] = None
+    language_list: Optional[List[str]] = None
 
 def get_markitdown(options: Optional[ConversionOptions] = None):
     """
@@ -308,10 +485,496 @@ def try_advanced_method(md, file_obj, filename):
         logger.warning(f"Abordagem avançada falhou: {str(e)}")
         raise
 
+@app.post("/convert-youtube")
+async def convert_youtube_url(request: YouTubeConversionRequest):
+    """
+    Converte uma URL do YouTube para Markdown extraindo sua transcrição.
+    
+    - **url**: URL do vídeo do YouTube a ser convertido
+    - **enable_plugins**: Se deve habilitar plugins (padrão: False)
+    - **language**: Idioma específico para a transcrição (ex: 'pt', 'en', 'es')
+    - **language_list**: Lista ordenada de idiomas preferidos (ex: ['pt-BR', 'pt', 'en'])
+    
+    Se tanto language quanto language_list forem fornecidos, language tem prioridade.
+    Se nenhum for fornecido, será usado o idioma padrão do vídeo.
+    
+    Retorna a transcrição do vídeo em formato Markdown.
+    """
+    try:
+        # Log da solicitação
+        logger.info(f"Processando URL do YouTube: {request.url}")
+        
+        # Validar idioma solicitado
+        all_languages = {**SUPPORTED_LANGUAGES, **AUTO_GENERATED_LANGUAGES}
+        
+        # Verificar se o idioma solicitado é válido
+        if request.language and request.language not in all_languages:
+            idiomas_similares = [code for code in all_languages.keys() 
+                                if request.language.lower() in code.lower() or 
+                                request.language.lower() in all_languages[code].lower()]
+            if idiomas_similares:
+                sugestoes = ", ".join(f"'{code}' ({all_languages[code]})" for code in idiomas_similares[:5])
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Idioma '{request.language}' não é suportado. Talvez você quis dizer: {sugestoes}"
+                )
+            else:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Idioma '{request.language}' não é suportado. Use /youtube-languages para ver os idiomas disponíveis."
+                )
+        
+        # Verificar se os idiomas na lista são válidos
+        if request.language_list:
+            invalid_langs = [lang for lang in request.language_list if lang not in all_languages]
+            if invalid_langs:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Os seguintes idiomas não são suportados: {', '.join(invalid_langs)}. Use /youtube-languages para ver os idiomas disponíveis."
+                )
+        
+        # Log dos idiomas solicitados
+        if request.language:
+            idioma_nome = all_languages.get(request.language, request.language)
+            logger.info(f"Idioma solicitado: {request.language} ({idioma_nome})")
+        elif request.language_list:
+            idiomas_nomes = [f"{lang} ({all_languages.get(lang, lang)})" for lang in request.language_list]
+            logger.info(f"Lista de idiomas: {', '.join(idiomas_nomes)}")
+        else:
+            logger.info(f"Usando idioma padrão do vídeo")
+        
+        # Criar instância do MarkItDown com as opções especificadas
+        md = MarkItDown(enable_plugins=request.enable_plugins)
+        
+        # Preparar kwargs extras para a conversão
+        convert_kwargs = {}
+        
+        # Adicionar configurações de idioma se fornecidas
+        if request.language:
+            convert_kwargs['language'] = request.language
+        elif request.language_list:
+            convert_kwargs['language_list'] = request.language_list
+            
+        logger.info(f"Parâmetros adicionais para conversão: {convert_kwargs}")
+        
+        # Converter a URL do YouTube usando o MarkItDown com os parâmetros específicos
+        result = md.convert(str(request.url), **convert_kwargs)
+        
+        # Verificar se a conversão foi bem-sucedida
+        if not result or not hasattr(result, 'text_content'):
+            raise HTTPException(
+                status_code=500, 
+                detail="Não foi possível extrair conteúdo da URL do YouTube"
+            )
+        
+        # Log do sucesso
+        content_length = len(result.text_content) if hasattr(result, 'text_content') else 0
+        logger.info(f"URL do YouTube convertida com sucesso. Tamanho do conteúdo: {content_length} caracteres")
+        
+        # Determinar o idioma utilizado (se disponível)
+        idioma_utilizado = None
+        if hasattr(result, 'language'):
+            idioma_utilizado = result.language
+            logger.info(f"Idioma utilizado na transcrição: {idioma_utilizado}")
+        
+        # Construir resposta
+        # Tentar extrair metadados disponíveis
+        metadata = {}
+        for attr in dir(result):
+            if (not attr.startswith('__') and 
+                not callable(getattr(result, attr)) and 
+                attr != "text_content"):
+                try:
+                    value = getattr(result, attr)
+                    if not isinstance(value, (str, int, float, bool, list, dict, type(None))):
+                        value = str(value)
+                    metadata[attr] = value
+                except:
+                    pass
+        
+        # Adicionar idioma utilizado nos metadados se não estiver já incluído
+        if idioma_utilizado and 'language' not in metadata:
+            metadata['language'] = idioma_utilizado
+            if idioma_utilizado in all_languages:
+                metadata['language_name'] = all_languages[idioma_utilizado]
+        
+        # Retornar o conteúdo markdown
+        return JSONResponse(content={
+            "url": str(request.url),
+            "markdown_content": result.text_content,
+            "metadata": metadata
+        })
+        
+    except Exception as e:
+        # Log detalhado do erro
+        logger.error(f"Erro ao converter URL do YouTube: {str(e)}", exc_info=True)
+        
+        # Não reenviar exceção HTTP
+        if isinstance(e, HTTPException):
+            raise e
+        
+        # Personalizar mensagem de erro com base no tipo
+        if "youtube_dl" in str(e).lower() or "pytube" in str(e).lower():
+            detail = f"Erro ao extrair informações do YouTube: {str(e)}. Verifique se todas as dependências estão instaladas com 'pip install markitdown[youtube-transcription]'"
+        elif "language" in str(e).lower():
+            detail = f"Erro relacionado ao idioma: {str(e)}. Use /youtube-languages para ver os idiomas disponíveis."
+        else:
+            detail = f"Erro ao processar URL do YouTube: {str(e)}"
+            
+        # Adicionar versão para diagnóstico
+        detail += f" (MarkItDown v{markitdown_version})"
+        
+        # Retornar erro
+        raise HTTPException(status_code=500, detail=detail)
+
 @app.get("/health")
 async def health_check():
     """Health check endpoint"""
     return {"status": "healthy"}
+
+@app.get("/youtube-languages")
+async def get_youtube_languages():
+    """
+    Retorna a lista de idiomas suportados para transcrição de vídeos do YouTube.
+    
+    O resultado contém duas categorias:
+    - translation_languages: Idiomas disponíveis para tradução
+    - auto_generated: Idiomas disponíveis com transcrição gerada automaticamente
+    """
+    return {
+        "translation_languages": SUPPORTED_LANGUAGES,
+        "auto_generated": AUTO_GENERATED_LANGUAGES
+    }
+
+def extract_video_id(url: str) -> str:
+    """Extrai o ID do vídeo do YouTube a partir da URL."""
+    # Padrões comuns de URLs do YouTube
+    patterns = [
+        r'(?:v=|\/)([0-9A-Za-z_-]{11}).*',  # URLs normais e incorporadas
+        r'(?:embed\/|v\/|youtu.be\/)([0-9A-Za-z_-]{11}).*'  # URLs encurtadas
+    ]
+    
+    for pattern in patterns:
+        match = re.search(pattern, url)
+        if match:
+            return match.group(1)
+    
+    raise ValueError(f"Não foi possível extrair o ID do vídeo da URL: {url}")
+
+@app.post("/youtube-transcript")
+async def get_youtube_transcript(request: YouTubeTranscriptRequest):
+    """
+    Obtém a transcrição de um vídeo do YouTube diretamente.
+    
+    Este endpoint usa a biblioteca youtube_transcript_api para extrair a transcrição,
+    sem depender do processamento do MarkItDown.
+    
+    - **url**: URL do vídeo do YouTube
+    - **language**: Idioma específico para a transcrição (ex: 'pt', 'en', 'es')
+    - **language_list**: Lista ordenada de idiomas preferidos (ex: ['pt-PT', 'pt', 'en'])
+    
+    Se tanto language quanto language_list forem fornecidos, language tem prioridade.
+    Se nenhum for fornecido, será usado o idioma original do vídeo.
+    
+    Retorna a transcrição do vídeo em formato Markdown.
+    """
+    try:
+        # Importação de biblioteca aqui para não quebrar se não estiver instalada
+        try:
+            from youtube_transcript_api import YouTubeTranscriptApi
+        except ImportError:
+            raise HTTPException(
+                status_code=500,
+                detail="Biblioteca 'youtube_transcript_api' não está instalada. Execute 'pip install youtube-transcript-api'."
+            )
+        
+        # Log da solicitação
+        logger.info(f"Processando transcrição direta da URL do YouTube: {request.url}")
+        
+        # Validar idioma solicitado
+        all_languages = {**SUPPORTED_LANGUAGES, **AUTO_GENERATED_LANGUAGES}
+        
+        # Verificar se o idioma solicitado é válido
+        if request.language and request.language not in all_languages:
+            idiomas_similares = [code for code in all_languages.keys() 
+                                if request.language.lower() in code.lower() or 
+                                request.language.lower() in all_languages[code].lower()]
+            if idiomas_similares:
+                sugestoes = ", ".join(f"'{code}' ({all_languages[code]})" for code in idiomas_similares[:5])
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Idioma '{request.language}' não é suportado. Talvez você quis dizer: {sugestoes}"
+                )
+            else:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Idioma '{request.language}' não é suportado. Use /youtube-languages para ver os idiomas disponíveis."
+                )
+        
+        # Verificar se os idiomas na lista são válidos
+        if request.language_list:
+            invalid_langs = [lang for lang in request.language_list if lang not in all_languages]
+            if invalid_langs:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Os seguintes idiomas não são suportados: {', '.join(invalid_langs)}. Use /youtube-languages para ver os idiomas disponíveis."
+                )
+        
+        # Extrair ID do vídeo
+        video_id = extract_video_id(str(request.url))
+        logger.info(f"ID do vídeo extraído: {video_id}")
+        
+        # Identificar o idioma original do vídeo
+        original_language = None
+        original_language_is_manual = False
+        available_languages = []
+        
+        try:
+            # Listar todas as transcrições disponíveis
+            transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
+            
+            # Armazenar informações sobre todas as legendas disponíveis
+            manual_transcripts = []  # Legendas manuais (não geradas automaticamente)
+            generated_transcripts = []  # Legendas geradas automaticamente
+            
+            for transcript in transcript_list:
+                lang_code = transcript.language_code
+                is_generated = transcript.is_generated
+                is_translatable = transcript.is_translatable
+                
+                lang_info = {
+                    "code": lang_code,
+                    "name": all_languages.get(lang_code, "Desconhecido"),
+                    "is_generated": is_generated,
+                    "is_translatable": is_translatable
+                }
+                
+                available_languages.append(lang_info)
+                
+                # Separar entre legendas manuais e geradas automaticamente
+                if is_generated:
+                    generated_transcripts.append(lang_info)
+                else:
+                    manual_transcripts.append(lang_info)
+                    
+                # Detectar se esta é a legendagem original
+                if hasattr(transcript, 'is_original') and transcript.is_original:
+                    original_language = lang_code
+                    original_language_is_manual = not is_generated
+                
+            # Se não conseguiu detectar a original pela propriedade, identificar por heurística
+            if not original_language:
+                # Preferir legendas manuais primeiro
+                if manual_transcripts:
+                    # Se houver legenda manual, considerar a primeira como original
+                    original_language = manual_transcripts[0]["code"]
+                    original_language_is_manual = True
+                elif generated_transcripts:
+                    # Se só houver legendas geradas automaticamente, usar a primeira
+                    original_language = generated_transcripts[0]["code"]
+                    original_language_is_manual = False
+                    
+            logger.info(f"Idioma original identificado: {original_language} (manual: {original_language_is_manual})")
+            logger.info(f"Legendas disponíveis: {len(available_languages)}")
+            
+        except Exception as e:
+            logger.warning(f"Erro ao listar legendas disponíveis: {str(e)}")
+        
+        # Log dos idiomas solicitados
+        if request.language:
+            idioma_nome = all_languages.get(request.language, request.language)
+            logger.info(f"Idioma solicitado pelo usuário: {request.language} ({idioma_nome})")
+        elif request.language_list:
+            idiomas_nomes = [f"{lang} ({all_languages.get(lang, lang)})" for lang in request.language_list]
+            logger.info(f"Lista de idiomas solicitada pelo usuário: {', '.join(idiomas_nomes)}")
+        elif original_language:
+            logger.info(f"Usando idioma original do vídeo: {original_language} ({all_languages.get(original_language, 'Desconhecido')})")
+        else:
+            logger.info(f"Nenhum idioma específico identificado, usando padrão do sistema")
+        
+        # Tentar obter a transcrição no idioma solicitado ou original
+        try:
+            language_used = None
+            
+            if request.language:
+                # Usar o idioma especificado pelo usuário
+                transcript = YouTubeTranscriptApi.get_transcript(video_id, languages=[request.language])
+                language_used = request.language
+                logger.info(f"Usando idioma solicitado: {language_used}")
+                
+            elif request.language_list:
+                # Tentar cada idioma da lista na ordem
+                transcript = YouTubeTranscriptApi.get_transcript(video_id, languages=request.language_list)
+                
+                # Determinar qual idioma foi realmente usado
+                for lang in request.language_list:
+                    try:
+                        test = YouTubeTranscriptApi.get_transcript(video_id, languages=[lang])
+                        if test:
+                            language_used = lang
+                            logger.info(f"Encontrado idioma da lista: {language_used}")
+                            break
+                    except:
+                        continue
+                
+                if not language_used:
+                    language_used = "desconhecido"
+                    logger.warning(f"Não foi possível determinar qual idioma da lista foi usado")
+                    
+            elif original_language:
+                # Usar o idioma original do vídeo
+                transcript = YouTubeTranscriptApi.get_transcript(video_id, languages=[original_language])
+                language_used = original_language
+                logger.info(f"Usando idioma original do vídeo: {language_used}")
+                
+            else:
+                # Último recurso: deixar a API escolher o idioma padrão
+                transcript = YouTubeTranscriptApi.get_transcript(video_id)
+                
+                # Tentar descobrir qual idioma foi usado
+                try:
+                    # Tentar obter uma amostra da transcrição e identificar o idioma
+                    sample_transcript = transcript[0]['text'] if transcript else ""
+                    logger.info(f"Amostra de texto: {sample_transcript[:100]}")
+                    
+                    # Verificar se corresponde a alguma transcrição que conhecemos
+                    for lang_info in available_languages:
+                        try:
+                            test_trans = YouTubeTranscriptApi.get_transcript(video_id, languages=[lang_info['code']])
+                            if test_trans and test_trans[0]['text'] == sample_transcript:
+                                language_used = lang_info['code']
+                                logger.info(f"Idioma identificado pela amostra: {language_used}")
+                                break
+                        except:
+                            continue
+                except:
+                    pass
+                
+                if not language_used:
+                    language_used = "desconhecido"
+                    logger.warning(f"Não foi possível determinar o idioma usado")
+        
+        except Exception as e:
+            logger.error(f"Erro ao obter transcrição: {str(e)}")
+            
+            # Mensagem de erro mais informativa
+            detail = f"Não foi possível obter a transcrição para este vídeo."
+            
+            if original_language:
+                detail += f" Idioma original do vídeo: {original_language}"
+                if available_languages:
+                    langs_disponiveis = ", ".join([f"{l['code']} ({l['name']})" for l in available_languages[:5]])
+                    detail += f". Idiomas disponíveis: {langs_disponiveis}"
+                    if len(available_languages) > 5:
+                        detail += f" e mais {len(available_languages)-5}."
+            
+            detail += f" Erro: {str(e)}"
+            
+            raise HTTPException(
+                status_code=404,
+                detail=detail
+            )
+        
+        # Converter para markdown
+        markdown_content = "# Transcrição do YouTube\n\n"
+        
+        # Adicionar metadados
+        try:
+            from pytube import YouTube
+            yt = YouTube(str(request.url))
+            markdown_content += f"## {yt.title}\n\n"
+            
+            if yt.description:
+                short_description = yt.description.split('\n')[0]  # Pegar só a primeira linha
+                markdown_content += f"*{short_description}*\n\n"
+                
+            markdown_content += f"- **Canal:** {yt.author}\n"
+            if yt.length:
+                minutes = yt.length // 60
+                seconds = yt.length % 60
+                markdown_content += f"- **Duração:** {minutes}:{seconds:02d}\n"
+                
+            markdown_content += f"- **Idioma da transcrição:** {language_used}"
+            if language_used in all_languages:
+                markdown_content += f" ({all_languages[language_used]})"
+            markdown_content += "\n\n"
+            
+            if original_language and original_language != language_used:
+                markdown_content += f"- **Idioma original do vídeo:** {original_language}"
+                if original_language in all_languages:
+                    markdown_content += f" ({all_languages[original_language]})"
+                markdown_content += "\n\n"
+                
+        except Exception as e:
+            logger.warning(f"Erro ao obter metadados do vídeo: {str(e)}")
+            markdown_content += "## Transcrição\n\n"
+        
+        # Adicionar o conteúdo da transcrição
+        markdown_content += "### Conteúdo\n\n"
+        
+        current_time = 0
+        paragraph_text = ""
+        
+        # Agrupar textos próximos em parágrafos (dentro de 2 segundos)
+        for item in transcript:
+            text = item['text']
+            start = item['start']
+            
+            # Se o tempo for muito distante do anterior, iniciar novo parágrafo
+            if start - current_time > 2.0 and paragraph_text:
+                markdown_content += paragraph_text.strip() + "\n\n"
+                paragraph_text = ""
+            
+            # Adicionar o texto atual
+            paragraph_text += text + " "
+            current_time = start
+        
+        # Adicionar o último parágrafo
+        if paragraph_text:
+            markdown_content += paragraph_text.strip()
+        
+        # Preparar resposta
+        response_data = {
+            "url": str(request.url),
+            "video_id": video_id,
+            "markdown_content": markdown_content,
+            "metadata": {
+                "available_languages": available_languages,
+                "language_used": language_used,
+                "language_name": all_languages.get(language_used, "Desconhecido") if language_used else "Desconhecido",
+                "original_language": original_language,
+                "original_language_name": all_languages.get(original_language, "Desconhecido") if original_language else "Desconhecido",
+                "original_language_is_manual": original_language_is_manual
+            }
+        }
+        
+        # Se temos metadados do pytube, incluir
+        try:
+            response_data["metadata"]["title"] = yt.title
+            response_data["metadata"]["author"] = yt.author
+            response_data["metadata"]["length_seconds"] = yt.length
+        except:
+            pass
+            
+        return JSONResponse(content=response_data)
+        
+    except Exception as e:
+        # Log detalhado do erro
+        logger.error(f"Erro ao processar transcrição do YouTube: {str(e)}", exc_info=True)
+        
+        # Não reenviar exceção HTTP
+        if isinstance(e, HTTPException):
+            raise e
+        
+        # Personalizar mensagem de erro
+        if "Could not retrieve a transcript" in str(e):
+            raise HTTPException(
+                status_code=404,
+                detail="Não foi possível encontrar legendas para este vídeo. É possível que o vídeo não tenha legendas disponíveis."
+            )
+        
+        detail = f"Erro ao processar transcrição do YouTube: {str(e)}"
+        raise HTTPException(status_code=500, detail=detail)
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))

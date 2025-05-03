@@ -16,13 +16,16 @@ WORKDIR /app
 # Copy API code
 COPY . /app
 
+# Instalar dependências específicas para transcrição do YouTube
+RUN pip --no-cache-dir install youtube-transcript-api
+
 # Install dependencies
 RUN pip --no-cache-dir install \
     fastapi \
     uvicorn \
     python-multipart \
     pydantic \
-    markitdown[all]
+    markitdown[all,youtube-transcription]
 
 # Default port
 ENV PORT=8000
