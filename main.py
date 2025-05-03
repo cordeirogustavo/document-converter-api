@@ -27,7 +27,7 @@ except Exception as e:
 app = FastAPI(
     title="MarkItDown API",
     description="API for converting various document formats to Markdown",
-    version="0.1.1",
+    version="0.1.2",
 )
 
 # Expor a versão da biblioteca na API
